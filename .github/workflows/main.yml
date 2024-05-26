@@ -1,0 +1,73 @@
+name: CI
+on: [push, pull_request]
+
+env:
+  NEKO_VERSION: 2.3.0
+
+jobs:
+  windows-build:
+    name: windows
+    strategy:
+      matrix:
+        arch: [Win32, x64]
+        vstools: [vs2017, vs2019]
+        include:
+          - arch: x64
+            name_suffix: 64
+
+          - vstools: vs2017
+            arch: Win32
+            cmake_generator: Visual Studio 15 2017
+
+          - vstools: vs2017
+            arch: x64
+            cmake_generator: Visual Studio 15 2017 Win64
+
+          - vstools: vs2019
+            cmake_generator: Visual Studio 16 2019
+
+    env:
+      CMAKE_BUILD_TYPE: RelWithDebInfo
+
+    runs-on: windows-2019
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install VS2017 tools
+        run: |
+          choco install visualstudio2017buildtools visualstudio2017-workload-vctools
+        if: ${{ matrix.vstools == 'vs2017' }}
+
+      - name: CMake
+        run: |
+          cmake . -G "${{ matrix.cmake_generator }}" ${{ env.CMAKE_ARCH_FLAG }}
+        env:
+          CMAKE_ARCH_FLAG: ${{ matrix.vstools == 'vs2019' && format('-A {0}', matrix.arch) || ' ' }}
+
+      - name: Download dependencies
+        run: |
+          cmake --build . --config $env:CMAKE_BUILD_TYPE --target download_deps || \
+          cmake --build . --config $env:CMAKE_BUILD_TYPE --target download_deps || \
+          cmake --build . --config $env:CMAKE_BUILD_TYPE --target download_deps
+
+      - name: Build
+        run: cmake --build . --config $env:CMAKE_BUILD_TYPE
+
+      - name: Test
+        run: ctest --verbose --build-config $env:CMAKE_BUILD_TYPE
+
+      - name: Package binaries
+        run: cmake --build . --config $env:CMAKE_BUILD_TYPE --target PACKAGE
+
+      - name: Check version
+        shell: bash
+        run: |
+          set -ex
+          [ "`./bin/neko -version`" == "$NEKO_VERSION" ]
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows${{ matrix.name_suffix }}-${{ matrix.vstools }}-binaries
+          path: bin/neko-${{ env.NEKO_VERSION }}-win${{ matrix.name_suffix }}.zip
